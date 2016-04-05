@@ -7,360 +7,127 @@ using System.Linq;
 namespace MathRace.Util
 {
 
-    public class MathExp
+    public enum TokenType
     {
-
-        private List<Unit> units;
-
-        public int solution;
-
-        public MathExp(List<Unit> exp, int answer)
-        {
-
-            solution = answer;
-            units = exp;
-
-        }
-
-        public MathExp(string exp, bool isRPN = false) : this(parseToList(exp, isRPN), solve(parseToList(exp, isRPN)))
-        {
-        }
-
-        private static int solve(List<Unit> x)
-        {
-            // TODO
-            return 0;
-        }
-
-        /// <summary>
-        /// Parses a mathematical expression to a List of units. Throws exceptions in different cases.
-        /// </summary>
-
-        public static List<Unit> parseToList(String exp, bool isRPN)
-        {
-
-            char[] temp = exp.ToCharArray();
-
-            Unit current = new Unit(0);
-
-            List<Unit> z = new List<Unit>();
-
-            List<char> x = new List<char>();
-
-
-            for (int i = 0; i < temp.Length; i++)
-            {
-
-                if (Unit.isMathematicalSymbolInclPara(temp[i]))
-                {
-
-                    if (Char.IsNumber(temp[i - 1]))
-                    {
-
-                        current = new Unit(Int32.Parse(string.Concat(x)));
-
-                        z.Add(current);
-
-                        x.Clear();
-
-                    }
-
-                    current = new Unit(temp[i]);
-
-                    z.Add(current);
-
-                }
-                else if (Char.IsNumber(temp[i]))
-                {
-
-                    x.Add(temp[i]);
-
-                }
-                else {
-
-                    throw new Exception("MathRace.Util.MathExp.parseToList: " + "something is neither a number nor a mathematical symbol: " + temp[i]);
-
-                }
-
-                if ((i == temp.Length - 1) && (!isRPN))
-                {
-
-                    current = new Unit(Int32.Parse(string.Concat(x)));
-                    z.Add(current);
-                    x.Clear();
-
-                }
-
-            }
-
-            if (!isRPN)
-            {
-
-                z = convertToRPN(z);
-
-            }
-
-            return z;
-
-        }
-
-        public static List<Unit> convertToRPN(List<Unit> exp)
-        {
-
-            List<Unit> outqueue = new List<Unit>();
-
-            List<Unit> stack = new List<Unit>();
-
-            for (int i = 0; i < exp.Count; i++)
-            {
-
-                // If the token is a number, then add it to the output queue
-
-                if (exp[i].isNumber)
-                {
-
-                    outqueue.Add(exp[i]);
-
-                }
-
-                // If the token is an operator
-
-                else if (!exp[i].isNumber)
-                {
-
-                    if (stack.Count() != 0)
-                    {
-
-                        int m = stack.Count() - 1;
-
-                        // Checks precdence
-
-                        while (m >= 0 && exp[i].prec <= stack[m].prec)
-                        {
-
-                            outqueue.Add(stack[m]);
-
-                            stack.RemoveAt(stack.Count - 1);
-
-                            m = stack.Count() - 1;
-
-                        }
-
-                    }
-
-                    stack.Add(exp[i]);
-
-                }
-
-                else if (!exp[i].isNumber && Unit.isLeftPara(exp[i].x.GetValueOrDefault()))
-                {
-
-                    stack.Add(exp[i]);
-
-                }
-
-            }
-
-
-            return null;
-        }
-
+        None,
+        Number,
+        Constant,
+        Operator,
+        Function,
+        LeftParenthesis,
+        RightParenthesis
     }
 
-    public class Unit
+    public enum MathConstants
     {
+        None,
+        E,
+        PI,
+    }
 
+    public enum Operators
+    {
+        Plus,
+        Minus,
+        Multiply,
+        Divide,
+        Quotient,
+        Exponent,
+        UnaryMinus,
+        Factorial,
+    }
 
-        static int PR_LEFTPAR = 3;
-        static int PR_RIGHTPAR = 3;
-        static int PR_PLUS = 4;
-        static int PR_MINUS = 4;
-        static int PR_MULT = 5;
-        static int PR_DIV = 5;
-        static int PR_MOD = 5;
-        static int PR_POWER = 6;
+    public enum Functions
+    {
+        sin,
+        cos,
+        tan,
+        arcsin,
+        arccos,
+        arctan
+    }
 
-        public bool isNumber { get; set; }
+    public struct RPNToken
+    {
+        public string TokenValue;
+        public double NumberValue;
+        public TokenType TokenValueType;
+        public MathConstants ConstantValueType;
+        public Operators OperatorType;
+        public Functions FunctionType;
+    }
 
-        public Unit(char a)
+    public class MathExp
+    {
+        public List<RPNToken> exp;
+        
+        public MathExp(List<RPNToken> RPNexpression)
         {
-            x = a;
-            setPrec(a);
+            exp = RPNexpression;
         }
-        public Unit(int a)
+
+        public RPNToken assign(string str)
         {
-            y = a;
-        }
 
+            RPNToken rn = new RPNToken();
 
-        public char? x
-        {
-            get { return x; }
-            set
-            {
+            rn.TokenValue = str;
 
-                if (isMathematicalSymbol(value.GetValueOrDefault()).Item1)
+            if (str.All(x => x.isDigit() || x == '.')){
+                if(double.TryParse(str, out rn.NumberValue))
                 {
-                    x = value;
+                    return rn;
                 }
-                else {
-
+                else
+                {
+                    throw new Exception("Cannot parse number for RPN: in MathExp");
                 }
-
-                isNumber = false;
-                y = null;
-
-
             }
-        }
-
-        public int? y
-        {
-            get { return y; }
-            set
+            else if(Enum.TryParse(str, out rn.ConstantValueType))
             {
-                isNumber = true;
-                x = null;
+                return rn;
             }
-        }
-
-        public int prec
-        {
-
-            get;
-            set;
-
-        }
-
-        private void setPrec(char x)
-        {
-
-            switch (x)
-            {
-                case '+':
-                    prec = PR_PLUS;
-                    break;
-                case '-':
-                    prec = PR_MINUS;
-                    break;
-                case '*':
-                    prec = PR_MULT;
-                    break;
-                case '/':
-                    prec = PR_DIV;
-                    break;
-                case '%':
-                    prec = PR_MOD;
-                    break;
-                case '^':
-                    prec = PR_POWER;
-                    break;
-                case '(':
-                    prec = PR_LEFTPAR;
-                    break;
-                case ')':
-                    prec = PR_RIGHTPAR;
-                    break;
-                case '[':
-                    prec = PR_LEFTPAR;
-                    break;
-                case ']':
-                    prec = PR_RIGHTPAR;
-                    break;
-                case '{':
-                    prec = PR_LEFTPAR;
-                    break;
-                case '}':
-                    prec = PR_RIGHTPAR;
-                    break;
-                default:
-                    break;
-            }
-
-        }
-
-
-        public static Tuple<bool, int> isMathematicalSymbol(char x)
-        {
-
-            switch (x)
+            else if (str.Single().isMathOperator())
             {
 
-                case '+':
-                    return new Tuple<bool, int>(true, PR_PLUS);
-                case '-':
-                    return new Tuple<bool, int>(true, PR_MINUS);
-                case '*':
-                    return new Tuple<bool, int>(true, PR_MULT);
-                case '/':
-                    return new Tuple<bool, int>(true, PR_DIV);
-                case '%':
-                    return new Tuple<bool, int>(true, PR_MOD);
-                case '^':
-                    return new Tuple<bool, int>(true, PR_POWER);
-                default:
-                    return new Tuple<bool, int>(false, 0);
+                rn.TokenValueType = TokenType.Operator;
+
+                switch (str.Single())
+                {
+                    case '+':
+                        rn.OperatorType = Operators.Plus;
+                        return rn;
+                    case '-':
+                        rn.OperatorType = Operators.Minus;
+                        return rn;
+                    case '*':
+                        rn.OperatorType = Operators.Multiply;
+                        return rn;
+                    case '/':
+                        rn.OperatorType = Operators.Divide;
+                        return rn;
+                    case '%':
+                        rn.OperatorType = Operators.Quotient;
+                        return rn;
+                    case '^':
+                        rn.OperatorType = Operators.Exponent;
+                        return rn;
+                    case '!':
+                        rn.OperatorType = Operators.Factorial;
+                        return rn;
+                    default:
+                        throw new Exception("Can't parse operator");
+                }
             }
-        }
-
-        public static bool isMathematicalSymbolInclPara(char x)
-        {
-
-            if (isMathematicalSymbol(x).Item1)
+            else if(Enum.TryParse(str, out rn.FunctionType))
             {
-                return true;
+                return rn;
             }
-            else {
-                return isPara(x);
-            }
-
-        }
-
-        public static bool isPara(char x)
-        {
-
-            return (isLeftPara(x) || isRightPara(x));
-
-        }
-
-        public static bool isLeftPara(char x)
-        {
-
-            switch (x)
+            else
             {
-
-
-                case '(':
-                    return true;
-                case '[':
-                    return true;
-                case '{':
-                    return true;
-                default:
-                    return false;
-
+                throw new Exception("Can't parse.");
             }
-
-        }
-
-        public static bool isRightPara(char x)
-        {
-
-            switch (x)
-            {
-
-
-                case ')':
-                    return true;
-                case ']':
-                    return true;
-                case '}':
-                    return true;
-                default:
-                    return false;
-
-            }
-
+            
         }
 
     }

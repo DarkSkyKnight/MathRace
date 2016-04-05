@@ -7,101 +7,271 @@ using System.IO.Ports;
 using System.Diagnostics;
 using System.Collections.Concurrent;
 using MathRace.Protocol;
+using InTheHand.Net.Bluetooth;
+using InTheHand.Net.Sockets;
+using InTheHand.Net;
+using System.Management;
+using MathRace.Util;
+using System.Net.Sockets;
+using System.Threading;
 
 namespace MathRace.IO
 {
     class Communicator
     {
 
+
+        private BluetoothEndPoint lep;
+        private BluetoothClient client;
+        private BluetoothComponent lc;
+
+        private BluetoothDeviceInfo theev3;
+
         private ParseBuffer buffer;
-        private ConcurrentQueue<Payload> queue;
+
+        public bool getbufferpayload(out Payload payload)
+        {
+            if (buffer.payloads.Any())
+            {
+                payload = buffer.payloads.First();
+                buffer.payloads.RemoveAt(0);
+                return true;
+            }
+            else
+            {
+                payload = null;
+                return false;
+            }
+        }
+
+        private NetworkStream stream;
         private SerialPort port;
         private Object connectlock;
+
+        public readonly List<BluetoothDeviceInfo> devicelist;
+        public bool foundanEV3 = false;
+
+        public bool isEV3paired
+        {
+            get
+            {
+                if (foundanEV3)
+                {
+
+                    Debug.Print("Found an EV3 in isEV3paired");
+
+                    if(devicelist.Count > 0)
+                    {
+                        return devicelist.Any(x => (x.DeviceName == "EV3") && (x.Authenticated));
+                    }
+                }
+
+                return false;
+
+            }
+        }
 
         public bool IsConnected
         {
             get
             {
-                return port.IsOpen;
+                return client.Connected;
             }
         }
 
-        public string portinfo
+        public BluetoothDeviceInfo EV3info
         {
             get
             {
-                try
-                {
-                    if (port.IsOpen)
-                    {
-                        return port.PortName;
-                    }
-                }
-                catch(Exception e)
-                {
-                    Debug.Print(e.Message);
-                }
-                return null;
+                return theev3;
             }
+        }
+
+        public NetworkStream getstream()
+        {
+            return stream;
         }
 
         public Communicator()
         {
+
             buffer = new ParseBuffer();
-            queue = new ConcurrentQueue<Payload>();
 
-            port = new SerialPort();
-            port.DataReceived += new SerialDataReceivedEventHandler(DataReceivedHandler);
+            Debug.Print("ParseBuffer and ConcurrentQueue initialized in Communicator.");
 
-            connectlock = new Object();
+            lep = new BluetoothEndPoint(NetworkControl.getBluetoothMacAddressofCurrentWin32Device(), BluetoothService.SerialPort);
+
+            Debug.Print("BluetoothEndPoint initialized in Communicator.");
+
+            client = new BluetoothClient(lep);
+
+            Debug.Print("BluetoothClient initialized in Communicator.");
+
+            lc = new BluetoothComponent(client);
+
+            Debug.Print("BluetoothComponent initialized in Communicator.");
+
+            devicelist = new List<BluetoothDeviceInfo>();
+
+
+            lc.DiscoverDevicesAsync(255, true, true, true, true, null);
+            lc.DiscoverDevicesProgress += new EventHandler<DiscoverDevicesEventArgs>(ddp);
+            lc.DiscoverDevicesComplete += new EventHandler<DiscoverDevicesEventArgs>(ddc);
+            
         }
 
-        public bool connect(string portname)
+        
+
+        private void ddp(object sender, DiscoverDevicesEventArgs e)
         {
-            lock (connectlock)
+
+            Debug.Print("Starting to discover Bluetooth devices...");
+
+            for (int i = 0; i < e.Devices.Length; i++)
             {
-                if(!port.IsOpen && IsValidPort(portname))
+
+                string x = "Bluetooth Device found: "
+                    + e.Devices[i].DeviceName
+                    + "\nDevice Address: "
+                    + e.Devices[i].DeviceAddress.ToString()
+                    + "\nRemembered: "
+                    + e.Devices[i].Remembered.ToString()
+                    + "\nAuthenticated: "
+                    + e.Devices[i].Authenticated.ToString();
+
+                Debug.Print(x);
+
+                if(e.Devices[i].DeviceName == "EV3")
                 {
-                    buffer.clear();
-                    ClearQueue();
-                    try
-                    {
-                        port.PortName = portname;
-                        port.Open();
-                        port.DiscardInBuffer();
-                        port.DiscardOutBuffer();
-                        return true;
-                    }
-                    catch(Exception e)
-                    {
-                        Debug.Print(e.Message);
-                    }
+                    theev3 = e.Devices[i];
+                    foundanEV3 = true;
                 }
-                return false;
+
+                devicelist.Add(e.Devices[i]);
+
             }
+
+        }
+
+        private void ddc(object sender, DiscoverDevicesEventArgs e)
+        {
+
+            Console.WriteLine("Searching for new devices has ended.");
+
+            if(!devicelist.Any(x => x.DeviceName == "EV3"))
+            {
+                Console.WriteLine("Searching for EV3 again.... Please wait....");
+                lc.DiscoverDevicesAsync(255, true, true, true, true, null);
+
+            }
+
+        }
+
+        public bool pair()
+        {
+
+            BluetoothAddress ev3 = null;
+
+            try {
+                ev3 = devicelist.Single(x => x.DeviceName == "EV3").DeviceAddress;
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine("More than one EV3 seems to exist!");
+            }
+
+            Console.WriteLine("Confirm the connection to this computer on your EV3. (Select the tick twice.)");
+
+            var y = BluetoothSecurity.PairRequest(ev3, "1234");
+
+            if (y)
+            {
+                devicelist.Remove(theev3);
+                theev3.Refresh();
+                devicelist.Add(theev3);
+            }
+
+            return y;
+
+        }
+
+        public void startconnect()
+        {
+
+            if (!isEV3paired)
+            {
+                Console.WriteLine("You need to pair with the EV3 first!");
+                return;
+            }
+
+            BluetoothAddress ev3 = null;
+
+            try
+            {
+                ev3 = devicelist.Single(x => x.DeviceName == "EV3").DeviceAddress;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("More than one EV3 seems to exist!");
+            }
+
+            Console.WriteLine("Beginning connection...");
+
+            client.SetPin("1234");
+            client.BeginConnect(ev3, BluetoothService.SerialPort, new AsyncCallback(endconnect), theev3);
+
+        }
+
+        private void endconnect(IAsyncResult ar)
+        {
+            if (ar.IsCompleted)
+            {
+                Console.WriteLine("Connection successful!");
+            }
+
+            stream = client.GetStream();
+
+            buffer.setstream(stream);
+
         }
 
         public bool Send(Payload payload)
         {
-            if(payload == null)
+            if (stream.CanWrite)
             {
-                throw new Exception("MathRace.IO.Communicator: payload is null when sending");
-            }
 
-            if (port.IsOpen)
-            {
-                try
+                if(payload.data_parsed != null)
                 {
-                    port.Write(payload.data_parsed, 0, payload.data_parsed.Length);
+                    try
+                    { stream.Write(payload.data_parsed, 0, payload.size); }
+                    catch
+                    {
+                        return false;
+                    }
+
+                    Debug.Print("Successfuly sent onto the stream!");
+
+                    return true;
                 }
-                catch(Exception e)
-                {
-                    Debug.Print(e.Message);
-                }
+
             }
 
             return false;
         }
+
+        public void Read()
+        {
+            if (stream.CanRead)
+            {
+                buffer.beginread();
+            }
+            else
+            {
+                throw new Exception("MathRace.IO.Communicator: Can't read yet!");
+            }
+        }
+
+        
 
         public bool Disconnect()
         {
@@ -146,48 +316,17 @@ namespace MathRace.IO
 
         public Payload ReadNext()
         {
-            Payload payload;
-            if(queue.TryDequeue(out payload)){
-                return payload;
-            }
             return null;
         }
 
         private void ClearQueue()
         {
-            while(queue.Count > 0)
-            {
-                Payload payload;
-                queue.TryDequeue(out payload);
-            }
+
         }
 
-        private void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
-        {
-            SerialPort sPort = (SerialPort)sender;
-            if (sPort.IsOpen)
-            {
-                try
-                {
+        
 
-                    if(sPort.BytesToRead > 0)
-                    {
-                        List<byte> rawdata = new List<byte>();
-                        buffer.Append(rawdata);
-                        Payload payload = buffer.readNext();
-                        while(payload != null)
-                        {
-                            queue.Enqueue(payload);
-                            payload = buffer.readNext();
-                        }
-                    }
-                }
-                catch(Exception xe)
-                {
-                    Debug.Print(xe.Message);
-                }
-            }
-        }
+        
 
     }
 }

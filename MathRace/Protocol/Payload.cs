@@ -22,6 +22,12 @@ namespace MathRace.Protocol
             private set;
         }
 
+        public string message
+        {
+            get;
+            private set;
+        }
+
         public bool data_bool
         {
             get;
@@ -44,6 +50,14 @@ namespace MathRace.Protocol
         {
             get;
             private set;
+        }
+
+        public int size
+        {
+            get
+            {
+                return data_parsed.Length;
+            }
         }
 
         public Payload(byte[] data)
@@ -75,23 +89,62 @@ namespace MathRace.Protocol
         public Payload(string title, List<byte> rawdata)
         {
             var x = Titles.checkType(title);
+
+            this.title = title;
+
             if (x.Item1)
             {
                 if(x.Item2 == 0)
                 {
                     data_bool = Parser.convertToLogic(rawdata);
                     type = x.Item2;
+                    message = data_bool.ToString();
                 }
                 else if(x.Item2 == 1)
                 {
                     data_float = Parser.convertToNumber(rawdata);
                     type = x.Item2;
+                    message = data_float.ToString();
                 }
                 else if(x.Item2 == 2)
                 {
                     data_string = Parser.convertTostring(rawdata);
                     type = x.Item2;
+                    message = data_string;
                 }
+            }
+        }
+
+        public override bool Equals(Object payload)
+        {
+            try
+            {
+                Payload pl = (Payload)payload;
+                
+                if(pl.data_parsed != null && this.data_parsed != null)
+                {
+                    if (pl.data_parsed.SequenceEqual(this.data_parsed))
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                else if(pl.type == this.type)
+                {
+                    return pl.data_bool == data_bool || pl.data_float == data_float || pl.data_string.Equals(data_string);
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e.Message);
+                return false;
             }
         }
 

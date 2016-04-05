@@ -83,16 +83,22 @@ namespace MathRace.Protocol
         public static byte[] toEV3(string title, float message)
         {
 
-            byte[] x = convertToBytes(title);
-            byte[] y = convertToBytes(message);
-            return combine(x, y, NUMBER);
+            if (title == null)
+            {
+                throw new ArgumentNullException("title");
+            }
+
+            byte[] titleField = Encoding.ASCII.GetBytes(title + '\0');
+            byte[] valueField = BitConverter.GetBytes(message);
+            return combine(titleField, valueField, NUMBER);
 
         }
 
         public static byte[] toEV3(string title, int message)
         {
 
-            float x = (float)message;
+            float x = 0.0F;
+            float.TryParse(message.ToString(), out x);
             return toEV3(title, x);
 
         }
@@ -100,18 +106,33 @@ namespace MathRace.Protocol
         public static byte[] toEV3(string title, string message)
         {
 
-            byte[] x = convertToBytes(title);
-            byte[] y = convertToBytes(message);
-            return combine(x, y, STRING);
+            if (title == null)
+            {
+                throw new ArgumentNullException("title");
+            }
+
+            if (message == null)
+            {
+                throw new ArgumentNullException("message");
+            }
+
+            byte[] titleField = Encoding.ASCII.GetBytes(title + '\0');
+            byte[] messageField = Encoding.ASCII.GetBytes(message + '\0');
+            return combine(titleField, messageField, STRING);
 
         }
 
         public static byte[] toEV3(string title, bool message)
         {
 
-            byte[] x = convertToBytes(title);
-            byte[] y = convertToBytes(message);
-            return combine(x, y, BOOLEAN);
+            if (title == null)
+            {
+                throw new ArgumentNullException("title");
+            }
+
+            byte[] titleField = Encoding.ASCII.GetBytes(title + '\0');
+            byte[] valueField = BitConverter.GetBytes(message);
+            return combine(titleField, valueField, BOOLEAN);
 
         }
 
@@ -121,6 +142,12 @@ namespace MathRace.Protocol
 
         public static Tuple<string, List<byte>> fromEV3(List<byte> raw)
         {
+
+            string[] z = raw.Select(y => y.ToString()).ToArray();
+
+            string zc = string.Join(" ", z);
+
+            Debug.Print("Raw data: " + zc);
 
             Tuple<bool, int> x;
 
@@ -145,22 +172,22 @@ namespace MathRace.Protocol
             // -----
             // Read the raw data and extracts title and message from a payload.
 
-            // a = x.Item2 - 2;
-            // b = x.Item2;
-            int c = x.Item2 + 4;
-            // d = x.Item2 + 5;
+            // a = x.Item2 - 2; whole size
+            // b = x.Item2; secret header
+            int c = x.Item2 + 4; // title size
+            // d = x.Item2 + 5; title
 
             int titlesize = (int)raw[c];
 
-            int e = x.Item2 + 6 + titlesize;
-            // f = x.Item2 + 6 + titlesize + 2;
+            int e = x.Item2 + 5 + titlesize; // message size
+            // f = x.Item2 + 5 + titlesize + 2;
 
             Debug.Print("c is " + c + " titlesize is " + titlesize + " e is " + e);
             Debug.Print("raw[e] is " + raw[e] + " raw [e + 1] is " + raw[e + 1]);
 
             int messagesize = convertToInteger(raw.GetRange(e, 2));
 
-            string title = convertTostring(raw.GetRange(c+1, titlesize));
+            string title = new string(convertTostring(raw.GetRange(c+1, titlesize)).Where(l => !char.IsControl(l)).ToArray());
             List<byte> message = raw.GetRange(e+2, messagesize);
 
             return new Tuple<string, List<byte>>(title, message);
@@ -212,6 +239,12 @@ namespace MathRace.Protocol
         public static Tuple<int, int> getSizeandEnd(List<byte> rawdata, int markindex)
         {
 
+            string[] z = rawdata.Select(y => y.ToString()).ToArray();
+
+            string zc = string.Join(" ", z);
+
+            Debug.Print("Raw data in getSizeandEnd: " + zc);
+
             int x = markindex;
 
             if (rawdata[x] == mark[0])
@@ -228,12 +261,14 @@ namespace MathRace.Protocol
 
                                 var y = convertToInteger(rawdata.GetRange(x - 2, 2));
 
-                                return new Tuple<int, int>(y, y + markindex - 2);
+                                return new Tuple<int, int>(y, y + markindex);
 
                             } catch (Exception e)
                             {
                                 Debug.Print("MathRace.Protocol.Parser.searchEnd: raw data is missing payloadsize header.");
                                 Debug.Print(e.Message);
+
+                                return null;
                             }
 
                         }
@@ -269,72 +304,26 @@ namespace MathRace.Protocol
                 throw new Exception("MathRace.Protocol.Parser.combine: Input message as BOOLEAN not 1 byte");
             }
 
-            byte[] titlesize = new byte[0];
-            byte[] messagesize = new byte[0];
-            byte[] payloadsize = new byte[0];
+            byte titleSizeField = (byte)(title.Length);
+            byte[] messageSizeField = BitConverter.GetBytes((UInt16)(message.Length));
+            UInt16 payloadSize = (UInt16)(mark.Length
+                                  + 1 + title.Length
+                                  + messageSizeField.Length + message.Length);
+            byte[] payloadSizeField = BitConverter.GetBytes(payloadSize);
 
-            int x = 0;
-            int y = 0;
+            // Create raw message
+            int rawMessageSize = 2 + payloadSize;
+            List<byte> rawMessage = new List<byte>(rawMessageSize);
+            rawMessage.AddRange(payloadSizeField);
+            rawMessage.AddRange(mark);
+            rawMessage.Add(titleSizeField);
+            rawMessage.AddRange(title);
+            rawMessage.AddRange(messageSizeField);
+            rawMessage.AddRange(message);
 
-            bool isstring = false;
+            Debug.Print("MathRace.Protocol.Parser.combine: current outcome: " + rawMessage.ToString());
 
-            x = title.Length;
-            titlesize = convertToBytes(title.Length, eightbit);
-
-            if (type == Parser.NUMBER)
-            {
-                y = NUMBER_MESSAGE_SIZE_LIMIT;
-                messagesize = convertToBytes(NUMBER_MESSAGE_SIZE_LIMIT, sixteenbit);
-            }
-            else if (type == Parser.BOOLEAN)
-            {
-                y = BOOLEAN_MESSAGE_SIZE_LIMIT;
-                messagesize = convertToBytes(BOOLEAN_MESSAGE_SIZE_LIMIT, sixteenbit);
-            }
-            else if (type == Parser.STRING)
-            {
-                y = message.Length + 1;
-                // + 1: 0x00 tail on Message if string
-                messagesize = convertToBytes(message.Length, sixteenbit);
-                isstring = true;
-            }
-
-            // + 1: Title header
-            // + 2: Message header
-            // + 4: Mark header
-            // + 1: 0x00 tail on Title
-
-            int z = x + y + 1 + 2 + 4 + 1;
-
-            Debug.Print("MathRace.Protocol.Parser.combine: " + "current raw title data is: " + BitConverter.ToString(title));
-            Debug.Print("MathRace.Protocol.Parser.combine: " + "current raw message data is: " + BitConverter.ToString(message));
-            Debug.Print("MathRace.Protocol.Parser.combine: " + "current x-value is: " + x);
-            Debug.Print("MathRace.Protocol.Parser.combine: " + "current y-value is: " + y);
-            Debug.Print("MathRace.Protocol.Parser.combine: " + "current z-value is: " + z);
-
-            payloadsize = convertToBytes(z, sixteenbit);
-
-            byte[] a = new byte[4];
-            a = mark;
-
-            byte[] blank = { 0x00 };
-
-            var outcome = new byte[2 + z];
-            payloadsize.CopyTo(outcome, PayloadSizeIndex);
-            a.CopyTo(outcome, MarkIndex);
-            titlesize.CopyTo(outcome, TitleSizeIndex);
-            title.CopyTo(outcome, TitleIndex);
-            blank.CopyTo(outcome, MessageSizeIndex(x) - 1);
-            messagesize.CopyTo(outcome, MessageSizeIndex(x));
-            message.CopyTo(outcome, MessageIndex(x));
-            if (isstring)
-            {
-                blank.CopyTo(outcome, z + 1);
-            }
-
-            Debug.Print("MathRace.Protocol.Parser.combine: " + "current outcome: " + BitConverter.ToString(outcome));
-
-            return outcome;
+            return rawMessage.ToArray();
 
         }
 
@@ -355,7 +344,8 @@ namespace MathRace.Protocol
                 Debug.Print("MathRace.Protocol.Parser.convertToNumber: " + x);
             }
             else {
-                throw new Exception("MathRace.Protocol.Parser.convertToNumber: " + "Length /= 4");
+                Debug.Print("MathRace.Protocol.Parser.convertToNumber: " + "Length /= 4");
+                return 0.0F;
             }
 
             return x;
